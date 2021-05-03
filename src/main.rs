@@ -1,6 +1,6 @@
 use fs::File;
 use regex::Regex;
-use std::{fs, io::Write};
+use std::{collections::HashSet, fs, io::Write};
 use structopt::StructOpt;
 use walkdir::{DirEntry, WalkDir};
 
@@ -51,11 +51,17 @@ fn main() {
         .filter_map(|f| {
             let parent = f.path().parent().unwrap().parent().unwrap();
             let app = parent.file_name().unwrap().to_str().unwrap().to_owned();
-            let filename = f.file_name().to_str().unwrap().to_owned();
+            let filename = f
+                .file_name()
+                .to_str()
+                .unwrap()
+                .strip_suffix(".py")
+                .unwrap()
+                .to_owned();
             Some(MigrationFile::new(f, app, filename))
         })
         .collect();
-    migration_files.sort_by(|a, b| {a.filename.partial_cmp(&b.filename).unwrap()});
+    migration_files.sort_by(|a, b| a.filename.partial_cmp(&b.filename).unwrap());
 
     let mut res: Vec<_> = migration_files
         .into_iter()
@@ -123,7 +129,7 @@ fn main() {
                 format!(
                     r###"
 ```mermaid
-flowchart LR
+flowchart TB
 subgraph {:}
 {:}.{:}
         "###,
@@ -148,23 +154,31 @@ subgraph {:}
                     previous_migration = None;
                     file.write(to_write.as_bytes()).unwrap();
                 }
-                // write the dependenci
+                // write the dependencies
                 let current = format!("{}.{}", &migration.app, migration.filename);
+
+                let dependency_vec: Vec<_> = dependencies
+                    .iter()
+                    .map(|(app, migr)| {
+                        let dep = format!("{}.{}", app, migr);
+                        format!("{} --> {}\n", dep, current)
+                    })
+                    .collect();
+
                 match previous_migration {
                     Some(prev) => {
-                        file.write(format!("{} --> {}\n", prev, current).as_bytes())
-                            .unwrap();
+                        let formatted_string = format!("{} --> {}\n", prev, current);
+                        if !dependency_vec.contains(&formatted_string) {
+                            file.write(formatted_string.as_bytes()).unwrap();
+                        }
                     }
                     None => {}
                 }
+                println!("{:#?}", &dependency_vec.join(""));
+                let bytes = dependency_vec.join("");
+                let bytes = bytes.as_bytes();
+                file.write(bytes).unwrap();
                 previous_migration = Some(current);
-                // dependencies.iter().map(|(app, migr)| {
-                //     let dep = format!("{}.{}", app, migr);
-                //     foramt!()
-                // });
-                // for dep in dependencies {
-
-                // }
             }
             file.write(b"end").unwrap();
             file.write(
